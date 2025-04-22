@@ -86,7 +86,7 @@ window
 floorplan
 (
    name "diag_1"     
-   bitmap "cappero_laser_odom_diag_2020-05-06-16-26-03.png"
+   bitmap "map.png"
    size   [106.913 49.3527 0.5]
    pose   [0 0 0 0]
 )
