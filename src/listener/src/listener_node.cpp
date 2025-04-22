@@ -29,31 +29,37 @@ float resolution;
 float influence_range = 10.0;
 int occupancy_threshold = 70; // Check again
 
-void mapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg) {
-    resolution = msg->info.resolution;
-    Vector2f origin(msg->info.origin.position.x, msg->info.origin.position.y);
+void mapCallback(const nav_msgs::OccupancyGrid& msg) {
+    if (map_received) {
+        ROS_WARN("Mappa già ricevuta, ignorando la nuova.");
+        return;
+    }
+    ROS_INFO("Mappa ricevuta! Header: frame_id=%s", msg.header.frame_id.c_str());
+    resolution = msg.info.resolution;
+    Vector2f origin(msg.info.origin.position.x, msg.info.origin.position.y);
     
     // Pulisci ostacoli precedenti
     obstacles.clear();
-    
+
+    std::cout << "Before reset " << std::endl;
+    grid_mapping.reset(origin, resolution);
+    std::cout << "Before For " << std::endl;
+
     // Estrai celle occupate
-    for (int y = 0; y < msg->info.height; ++y) {
-        for (int x = 0; x < msg->info.width; ++x) {
-            int index = y * msg->info.width + x;
-            //Check again (dopo)
-            int8_t value = msg->data[index];
+    for (int y = 0; y < msg.info.height; ++y) {
+        for (int x = 0; x < msg.info.width; ++x) {
+            int index = y * msg.info.width + x;
+            int8_t value = msg.data[index];
             if (value >= occupancy_threshold) {
-                //Check again dopo
-                Vector2f coord = Vector2f(x, y).cast<float>();
+                Vector2f coord = grid_mapping.grid2world(Vector2f(x,y));
                 obstacles.push_back(coord);
             }
         }
     }
-    
+    std::cout << "After For " << std::endl;
     // Inizializza il localizzatore con questi ostacoli
     localizer.setMap(obstacles, resolution, influence_range);
-    grid_mapping.reset(origin, resolution);
-    
+    std::cout << "After setmap " << std::endl;
     map_received = true;
     ROS_INFO("Mappa processata con %lu ostacoli", obstacles.size());
 }
@@ -97,19 +103,19 @@ void publishTransform(const ros::Time& stamp) {
     tf_broadcaster->sendTransform(transform);
 }
 
-void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan) {
+void scanCallback(const sensor_msgs::LaserScan& scan) {
     if (!map_received || !initial_pose_received) {
         ROS_WARN_THROTTLE(1.0, "In attesa della mappa e della posa iniziale...");
         return;
     }
-
+    ROS_INFO("Scan ricevuto! Header: frame_id=%s", scan.header.frame_id.c_str());
     // Converti scan in punti nel frame del robot
     std::vector<Vector2f> scan_points;
-    for (size_t i = 0; i < scan->ranges.size(); ++i) {
-        float angle = scan->angle_min + i * scan->angle_increment;
-        float range = scan->ranges[i];
+    for (size_t i = 0; i < scan.ranges.size(); ++i) {
+        float angle = scan.angle_min + i * scan.angle_increment;
+        float range = scan.ranges[i];
         
-        if (range < scan->range_min || range > scan->range_max) {
+        if (range < scan.range_min || range > scan.range_max) {
             continue;
         }
         
@@ -121,10 +127,10 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan) {
     
     if (success) {
         // Pubblica odometry corretto
-        publishOdometry(scan->header.stamp);
+        publishOdometry(scan.header.stamp);
         
         // Pubblica trasformazione TF
-        publishTransform(scan->header.stamp);
+        publishTransform(scan.header.stamp);
         
         ROS_DEBUG_THROTTLE(1.0, "Localizzazione riuscita. Posa: (%.2f, %.2f)",
                           localizer.X.translation().x(), localizer.X.translation().y());
@@ -134,17 +140,22 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan) {
 }
 
 //Check again
-void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& pose) {
+void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped& pose) {
+    if (initial_pose_received) {
+        ROS_WARN("Posa iniziale già ricevuta, ignorando il nuovo messaggio.");
+        return;
+    }
+    ROS_INFO("Posa iniziale ricevuta! Header: frame_id=%s", pose.header.frame_id.c_str());
     // Imposta la posa iniziale
-    localizer.X.translation().x() = pose->pose.pose.position.x;
-    localizer.X.translation().y() = pose->pose.pose.position.y;
+    localizer.X.translation().x() = pose.pose.pose.position.x;
+    localizer.X.translation().y() = pose.pose.pose.position.y;
     
     // Converti quaternione in matrice di rotazione 2D
     tf2::Quaternion q(
-        pose->pose.pose.orientation.x,
-        pose->pose.pose.orientation.y,
-        pose->pose.pose.orientation.z,
-        pose->pose.pose.orientation.w);
+        pose.pose.pose.orientation.x,
+        pose.pose.pose.orientation.y,
+        pose.pose.pose.orientation.z,
+        pose.pose.pose.orientation.w);
     tf2::Matrix3x3 m(q);
     double roll, pitch, yaw;
     m.getRPY(roll, pitch, yaw);
@@ -153,8 +164,8 @@ void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPt
     
     initial_pose_received = true;
     ROS_INFO("Posa iniziale ricevuta: (%.2f, %.2f, %.2f)", 
-             pose->pose.pose.position.x, 
-             pose->pose.pose.position.y,
+             pose.pose.pose.position.x, 
+             pose.pose.pose.position.y,
              yaw);
 }
 
@@ -174,9 +185,7 @@ int main(int argc, char **argv) {
     ros::Subscriber scan_sub = nh.subscribe("/base_scan", 10, scanCallback);
     
     ROS_INFO("Nodo localizzatore avviato");
-    while (ros::ok()) {
-        ros::spinOnce();
-    }
+    ros::spin();
     
     delete tf_broadcaster;
     return 0;
