@@ -9,14 +9,10 @@
 #include "nav_msgs/Odometry.h"
 #include "geometry_msgs/PoseWithCovarianceStamped.h"
 
-// try to include tf2 and Geometry
-#include <tf2_ros/transform_broadcaster.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <Eigen/Geometry>
 
 // Global variables
 ros::Publisher pose_pub;
-tf2_ros::TransformBroadcaster* tf_broadcaster;
 
 GridMapping grid_mapping;
 DMapLocalizer localizer;
@@ -27,7 +23,7 @@ bool initial_pose_received = false;
 // Parameters
 float resolution;
 float influence_range = 10.0;
-int occupancy_threshold = 70; // Check again
+int occupancy_threshold = 100;
 
 void mapCallback(const nav_msgs::OccupancyGrid& msg) {
     if (map_received) {
@@ -37,70 +33,55 @@ void mapCallback(const nav_msgs::OccupancyGrid& msg) {
     ROS_INFO("Mappa ricevuta! Header: frame_id=%s", msg.header.frame_id.c_str());
     resolution = msg.info.resolution;
     Vector2f origin(msg.info.origin.position.x, msg.info.origin.position.y);
-    
-    // Pulisci ostacoli precedenti
+
     obstacles.clear();
-
-    std::cout << "Before reset " << std::endl;
     grid_mapping.reset(origin, resolution);
-    std::cout << "Before For " << std::endl;
 
-    // Estrai celle occupate
     for (int y = 0; y < msg.info.height; ++y) {
         for (int x = 0; x < msg.info.width; ++x) {
             int index = y * msg.info.width + x;
             int8_t value = msg.data[index];
-            if (value >= occupancy_threshold) {
+            if (value == occupancy_threshold) {
                 Vector2f coord = grid_mapping.grid2world(Vector2f(x,y));
                 obstacles.push_back(coord);
             }
         }
     }
-    std::cout << "After For " << std::endl;
-    // Inizializza il localizzatore con questi ostacoli
+
     localizer.setMap(obstacles, resolution, influence_range);
-    std::cout << "After setmap " << std::endl;
     map_received = true;
     ROS_INFO("Mappa processata con %lu ostacoli", obstacles.size());
 }
 
-// Check again dopo
 void publishOdometry(const ros::Time& stamp) {
     nav_msgs::Odometry odom;
     odom.header.stamp = stamp;
     odom.header.frame_id = "map";
     odom.child_frame_id = "robot";
-    
-    // Posizione
+
     odom.pose.pose.position.x = localizer.X.translation().x();
     odom.pose.pose.position.y = localizer.X.translation().y();
-    
-    // Orientamento
+
     float yaw = atan2(localizer.X.linear()(1,0), localizer.X.linear()(0,0));
-    tf2::Quaternion q;
-    q.setRPY(0, 0, yaw);
-    odom.pose.pose.orientation = tf2::toMsg(q);
-    
+    odom.pose.pose.orientation.z = sin(yaw * 0.5);
+    odom.pose.pose.orientation.w = cos(yaw * 0.5);
+
     pose_pub.publish(odom);
+    ROS_INFO("Odometry pubblicata: (%.2f, %.2f, %.2f)",
+             odom.pose.pose.position.x,
+             odom.pose.pose.position.y,
+             yaw);
 }
-//Check again dopo
-void publishTransform(const ros::Time& stamp) {
-    geometry_msgs::TransformStamped transform;
-    transform.header.stamp = stamp;
-    transform.header.frame_id = "map";
-    transform.child_frame_id = "robot";
-    
-    // Posizione
-    transform.transform.translation.x = localizer.X.translation().x();
-    transform.transform.translation.y = localizer.X.translation().y();
-    
-    // Orientamento
-    float yaw = atan2(localizer.X.linear()(1,0), localizer.X.linear()(0,0));
-    tf2::Quaternion q;
-    q.setRPY(0, 0, yaw);
-    transform.transform.rotation = tf2::toMsg(q);
-    
-    tf_broadcaster->sendTransform(transform);
+
+void computeScanEndpoints(std::vector<Vector2f>& dest, const sensor_msgs::LaserScan& scan) {
+    dest.clear();
+    for (size_t i=0; i<scan.ranges.size(); ++i) {
+        float alpha=scan.angle_min+i*scan.angle_increment;
+        float r=scan.ranges[i];
+        if (r< scan.range_min || r> scan.range_max)
+            continue;
+        dest.push_back(Vector2f(r*cos(alpha), r*sin(alpha)));
+    }
 }
 
 void scanCallback(const sensor_msgs::LaserScan& scan) {
@@ -108,85 +89,55 @@ void scanCallback(const sensor_msgs::LaserScan& scan) {
         ROS_WARN_THROTTLE(1.0, "In attesa della mappa e della posa iniziale...");
         return;
     }
-    ROS_INFO("Scan ricevuto! Header: frame_id=%s", scan.header.frame_id.c_str());
-    // Converti scan in punti nel frame del robot
-    std::vector<Vector2f> scan_points;
-    for (size_t i = 0; i < scan.ranges.size(); ++i) {
-        float angle = scan.angle_min + i * scan.angle_increment;
-        float range = scan.ranges[i];
-        
-        if (range < scan.range_min || range > scan.range_max) {
-            continue;
-        }
-        
-        scan_points.emplace_back(range * cos(angle), range * sin(angle));
-    }
 
-    // Esegui localizzazione
-    bool success = localizer.localize(scan_points, 10);
-    
-    if (success) {
-        // Pubblica odometry corretto
-        publishOdometry(scan.header.stamp);
-        
-        // Pubblica trasformazione TF
-        publishTransform(scan.header.stamp);
-        
-        ROS_DEBUG_THROTTLE(1.0, "Localizzazione riuscita. Posa: (%.2f, %.2f)",
-                          localizer.X.translation().x(), localizer.X.translation().y());
-    } else {
-        ROS_WARN_THROTTLE(1.0, "Localizzazione fallita - non abbastanza inlieri");
-    }
+    std::vector<Vector2f> scan_points;
+    computeScanEndpoints(scan_points, scan);
+    localizer.localize(scan_points, 10);
+    publishOdometry(scan.header.stamp);
+
+    ROS_INFO("Posa stimata: x=%.2f, y=%.2f, theta=%.2f",
+             localizer.X.translation().x(),
+             localizer.X.translation().y(),
+             atan2(localizer.X.linear()(1,0), localizer.X.linear()(0,0)));
 }
 
-//Check again
 void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped& pose) {
     if (initial_pose_received) {
         ROS_WARN("Posa iniziale già ricevuta, ignorando il nuovo messaggio.");
         return;
     }
     ROS_INFO("Posa iniziale ricevuta! Header: frame_id=%s", pose.header.frame_id.c_str());
-    // Imposta la posa iniziale
+
     localizer.X.translation().x() = pose.pose.pose.position.x;
     localizer.X.translation().y() = pose.pose.pose.position.y;
-    
-    // Converti quaternione in matrice di rotazione 2D
-    tf2::Quaternion q(
+
+    Eigen::Quaternionf q(
+        pose.pose.pose.orientation.w,
         pose.pose.pose.orientation.x,
         pose.pose.pose.orientation.y,
-        pose.pose.pose.orientation.z,
-        pose.pose.pose.orientation.w);
-    tf2::Matrix3x3 m(q);
-    double roll, pitch, yaw;
-    m.getRPY(roll, pitch, yaw);
-    
-    localizer.X.linear() = Eigen::Rotation2Df(yaw).toRotationMatrix();
-    
+        pose.pose.pose.orientation.z
+    );
+    localizer.X.linear() = Eigen::Rotation2Df(q.toRotationMatrix().eulerAngles(0,1,2)[2]).toRotationMatrix();
+
     initial_pose_received = true;
-    ROS_INFO("Posa iniziale ricevuta: (%.2f, %.2f, %.2f)", 
+
+    ROS_INFO("Posa inizializzata: (%.2f, %.2f, yaw=%.2f)", 
              pose.pose.pose.position.x, 
              pose.pose.pose.position.y,
-             yaw);
+             atan2(localizer.X.linear()(1,0), localizer.X.linear()(0,0)));
 }
 
 int main(int argc, char **argv) {
     ros::init(argc, argv, "listener_node");
     ros::NodeHandle nh;
-    
-    // Inizializza publisher e broadcaster TF
+
     pose_pub = nh.advertise<nav_msgs::Odometry>("/odom_corrected", 10);
-    tf_broadcaster = new tf2_ros::TransformBroadcaster();
-    
-    // Sottoscrittori
     ros::Subscriber map_sub = nh.subscribe("/map", 1, mapCallback);
-    
-    //Check again
-    ros::Subscriber initial_pose_sub = nh.subscribe("/initialpose", 10, initialPoseCallback);
-    ros::Subscriber scan_sub = nh.subscribe("/base_scan", 10, scanCallback);
-    
-    ROS_INFO("Nodo localizzatore avviato");
+    ros::Subscriber initial_pose_sub = nh.subscribe("/initialpose", 1, initialPoseCallback);
+    ros::Subscriber scan_sub = nh.subscribe("/base_scan", 1, scanCallback);
+
+    ROS_INFO("Nodo listener avviato");
     ros::spin();
-    
-    delete tf_broadcaster;
+
     return 0;
 }
