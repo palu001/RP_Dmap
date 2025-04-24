@@ -47,20 +47,20 @@ void DMapLocalizer::setMap(const std::vector<Eigen::Vector2f> obstacles,
   for (const auto& o: obstacles){
     grid_obstacles.push_back(grid_mapping.world2grid(o).cast<int>());
   }
-
   // calculate the influence range, squared in pixels
   int dmax_2=pow(influence_range/resolution,2);
+
   DMap dmap(rows, cols);
   dmap.clear();
+
   int ops = dmap.compute(grid_obstacles, dmax_2);
-  
+
   //compute from the dmap the distances
   dmap.copyTo(distances, dmax_2);
 
   // convert it from pixels (squared) to meters
   for (auto& f: distances.cells)
     f*=resolution;
-
   // compute the derivatives
   distances.colDerivative(distances_dc);
   distances.rowDerivative(distances_dr);
@@ -120,6 +120,7 @@ bool DMapLocalizer::localize(const std::vector<Vector2f>& measurements,
     for (const auto& m: measurements) {
       Vector2f p_world = X*m;
       Vector2f p_grid=grid_mapping.world2grid(p_world);
+      p_grid.y()*=-1;
       if (! distances.inside(p_grid))
         continue;
       float e=distances(p_grid);

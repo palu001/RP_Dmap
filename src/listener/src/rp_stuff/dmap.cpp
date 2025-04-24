@@ -1,8 +1,8 @@
 #include "dmap.h"
 
-int DMap::compute(const std::vector<Vector2i>& obstacles, int dmax2_) {
+int DMap::compute(const std::vector<Vector2i>& obstacles, int dmax2) {
   FrontierType frontier;
-  dmax2=dmax2_;
+
   //populate the frontier
   for (const auto& o: obstacles) {
     if (! inside(o))
