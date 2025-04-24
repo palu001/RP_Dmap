@@ -9,8 +9,6 @@
 #include "nav_msgs/Odometry.h"
 #include "geometry_msgs/PoseWithCovarianceStamped.h"
 
-#include <Eigen/Geometry>
-
 // Global variables
 ros::Publisher pose_pub;
 
@@ -22,8 +20,7 @@ bool initial_pose_received = false;
 
 // Parameters
 float resolution;
-float influence_range = 10.0;
-int occupancy_threshold = 90;
+int occupancy_threshold = 100;
 
 void mapCallback(const nav_msgs::OccupancyGrid& msg) {
     if (map_received) {
@@ -41,14 +38,15 @@ void mapCallback(const nav_msgs::OccupancyGrid& msg) {
         for (int x = 0; x < msg.info.width; ++x) {
             int index = y * msg.info.width + x;
             int8_t value = msg.data[index];
-            if (value >= occupancy_threshold) {
+            if (value == occupancy_threshold) {
                 Vector2f coord = grid_mapping.grid2world(Vector2f(x,y));
                 obstacles.push_back(coord);
             }
         }
     }
 
-    localizer.setMap(obstacles, resolution, influence_range);
+    localizer.setMap(obstacles, resolution, 10);
+    localizer.X.setIdentity();
     map_received = true;
     ROS_INFO("Mappa processata con %lu ostacoli", obstacles.size());
 }
@@ -91,7 +89,7 @@ void scanCallback(const sensor_msgs::LaserScan& scan) {
     localizer.localize(scan_points, 10);
     publishOdometry(scan.header.stamp);
 
-    std::cout << "Localizer: "<<localizer.X.translation().transpose() << std::endl;
+    std::cout << "Localizer: "<<localizer.X.matrix() << std::endl;
 
 }
 
