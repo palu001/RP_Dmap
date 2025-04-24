@@ -67,10 +67,6 @@ void publishOdometry(const ros::Time& stamp) {
     odom.pose.pose.orientation.w = cos(yaw * 0.5);
 
     pose_pub.publish(odom);
-    ROS_INFO("Odometry pubblicata: (%.2f, %.2f, %.2f)",
-             odom.pose.pose.position.x,
-             odom.pose.pose.position.y,
-             yaw);
 }
 
 void computeScanEndpoints(std::vector<Vector2f>& dest, const sensor_msgs::LaserScan& scan) {
@@ -95,10 +91,8 @@ void scanCallback(const sensor_msgs::LaserScan& scan) {
     localizer.localize(scan_points, 10);
     publishOdometry(scan.header.stamp);
 
-    ROS_INFO("Posa stimata: x=%.2f, y=%.2f, theta=%.2f",
-             localizer.X.translation().x(),
-             localizer.X.translation().y(),
-             atan2(localizer.X.linear()(1,0), localizer.X.linear()(0,0)));
+    std::cout << "Localizer: "<<localizer.X.translation().transpose() << std::endl;
+
 }
 
 void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped& pose) {
@@ -121,10 +115,7 @@ void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped& pose) {
 
     initial_pose_received = true;
 
-    ROS_INFO("Posa inizializzata: (%.2f, %.2f, yaw=%.2f)", 
-             pose.pose.pose.position.x, 
-             pose.pose.pose.position.y,
-             atan2(localizer.X.linear()(1,0), localizer.X.linear()(0,0)));
+    std::cout << "Localizer: " << localizer.X.matrix() << std::endl;
 }
 
 int main(int argc, char **argv) {
