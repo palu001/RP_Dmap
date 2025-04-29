@@ -21,14 +21,14 @@ bool initial_pose_received = false;
 // Parameters
 float resolution;
 float influence_range = 10.0;
-int occupancy_threshold = 90;
+int occupancy_threshold = 100;
 
 void mapCallback(const nav_msgs::OccupancyGrid& msg) {
     if (map_received) {
-        ROS_WARN("Mappa già ricevuta, ignorando la nuova.");
+        ROS_WARN("Map already received, ignoring the new one.");
         return;
     }
-    ROS_INFO("Mappa ricevuta! Header: frame_id=%s", msg.header.frame_id.c_str());
+    ROS_INFO("Map received! Header: frame_id=%s", msg.header.frame_id.c_str());
     resolution = msg.info.resolution;
     Vector2f origin(msg.info.origin.position.x, msg.info.origin.position.y);
 
@@ -39,7 +39,7 @@ void mapCallback(const nav_msgs::OccupancyGrid& msg) {
         for (int x = 0; x < msg.info.width; ++x) {
             int index = y * msg.info.width + x;
             int8_t value = msg.data[index];
-            if (value >= occupancy_threshold) {
+            if (value == occupancy_threshold) {
                 Vector2f coord = grid_mapping.grid2world(Vector2f(x,y));
                 obstacles.push_back(coord);
             }
@@ -49,7 +49,7 @@ void mapCallback(const nav_msgs::OccupancyGrid& msg) {
     localizer.setMap(obstacles, resolution, influence_range);
     localizer.X.setIdentity();
     map_received = true;
-    ROS_INFO("Mappa processata con %lu ostacoli", obstacles.size());
+    ROS_INFO("Map processed with %lu obstacles", obstacles.size());
 }
 
 void publishOdometry(const ros::Time& stamp) {
@@ -80,7 +80,7 @@ void computeScanEndpoints(std::vector<Vector2f>& dest, const sensor_msgs::LaserS
 
 void scanCallback(const sensor_msgs::LaserScan& scan) {
     if (!map_received || !initial_pose_received) {
-        ROS_WARN_THROTTLE(1.0, "In attesa della mappa e della posa iniziale...");
+        ROS_WARN_THROTTLE(1.0, "Waiting for map and initial pose...");
         return;
     }
 
@@ -95,7 +95,7 @@ void scanCallback(const sensor_msgs::LaserScan& scan) {
 
 void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped& pose) {
     if (initial_pose_received) {
-        ROS_WARN("Posa iniziale già ricevuta, ignorando il nuovo messaggio.");
+        ROS_WARN("Initial pose already received, ignoring the new message.");
         return;
     }
     ROS_INFO("Posa iniziale ricevuta! Header: frame_id=%s", pose.header.frame_id.c_str());
@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
     ros::Subscriber initial_pose_sub = nh.subscribe("/initialpose", 1, initialPoseCallback);
     ros::Subscriber scan_sub = nh.subscribe("/base_scan", 1, scanCallback);
 
-    ROS_INFO("Nodo listener avviato");
+    ROS_INFO("Node started");
     ros::spin();
 
     return 0;
