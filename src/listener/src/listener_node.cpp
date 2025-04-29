@@ -38,7 +38,7 @@ void mapCallback(const nav_msgs::OccupancyGrid& msg) {
     for (int y = 0; y < msg.info.height; ++y) {
         for (int x = 0; x < msg.info.width; ++x) {
             int index = y * msg.info.width + x;
-            int8_t value = msg.data[index];
+            int value = msg.data[index];
             if (value == occupancy_threshold) {
                 Vector2f coord = grid_mapping.grid2world(Vector2f(x,y));
                 obstacles.push_back(coord);
