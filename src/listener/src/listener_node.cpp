@@ -9,8 +9,6 @@
 #include "nav_msgs/Odometry.h"
 #include "geometry_msgs/PoseWithCovarianceStamped.h"
 
-#include <Eigen/Geometry>
-
 // Global variables
 ros::Publisher pose_pub;
 
